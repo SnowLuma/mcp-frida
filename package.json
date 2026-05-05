@@ -1,0 +1,26 @@
+{
+  "name": "mcp-ida-frida",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "frida-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "keywords": ["mcp", "frida", "dynamic-analysis", "reverse-engineering"],
+  "author": "",
+  "license": "ISC",
+  "description": "MCP server for Frida-based dynamic analysis with crash resilience",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@types/node": "^25.5.0",
+    "frida": "^17.8.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.3.6"
+  }
+}
