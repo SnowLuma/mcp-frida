@@ -1,19 +1,19 @@
 # frida-mcp
 
-极简的 Frida MCP 服务器。**只暴露 5 个工具**，把 Hook / 内存 / 调用栈等全部能力交给 LLM 用一次性的 Frida JS 脚本自主表达，避免工具爆炸。
+极简的 Frida MCP 服务器。
 
 ## 设计理念
 
 - **Attach → LoadScript → Call/Listen → Unload** 的最短工作流
-- 进程崩溃或 detach 时，工具会返回明确错误并指示 LLM **重新调用 `attach`**
-- 所有真正"干活"的逻辑写在 Frida JS 里（由 LLM 在 `load_script` 时生成），不是固化的工具
-- 持久脚本可暴露 `rpc.exports` 与 `send(...)` 两条通道，对应 `call_rpc` 与 `get_script_output`
+- **Frida语料被大多数模型广泛训练过** 可直接使用
+- **工具数量最少化** 只暴露 6 个工具，少就是好，上下文精简
 
 ## 工具一览
 
 | 工具 | 用途 |
 |------|------|
 | `attach` | Attach Frida 到进程（PID 或进程名）。进程 detach/crash 后必须重新调用 |
+| `detach` | 主动断开当前进程并卸载所有持久脚本，适合换目标前调用 |
 | `load_script` | 加载一段持久 Frida JS。可定义 `rpc.exports = {...}`，可用 `send(data)` 产出日志 |
 | `call_rpc` | 调用 `load_script` 注册的 RPC 方法，同步返回结果 |
 | `get_script_output` | 拉取并清空脚本的 `send(...)` 消息队列，类似 tail log |
@@ -60,44 +60,8 @@ node dist/index.js 12345
 }
 ```
 
-## 典型工作流
+## Thanks
 
-1. `attach({ target: "notepad.exe" })` —— 附加目标进程
-2. `load_script({ name: "probe", source: "..." })` —— 注入带 `rpc.exports` 的脚本
-3. `call_rpc({ script: "probe", method: "readString", args: ["0x7ff..."] })` —— 同步调用
-4. `get_script_output({ name: "probe" })` —— 拉取 `send(...)` 累积日志
-5. `unload_script({ name: "probe" })` —— 清理
-
-### 脚本示例
-
-```js
-// 在 load_script 的 source 中
-const user32 = Process.getModuleByName("user32.dll");
-Interceptor.attach(user32.getExportByName("MessageBoxW"), {
-  onEnter(args) {
-    send({ caption: args[2].readUtf16String(), text: args[1].readUtf16String() });
-  },
-});
-
-rpc.exports = {
-  readPtr: (addr) => ptr(addr).readPointer().toString(),
-};
-```
-
-## 崩溃 / 断开处理
-
-- 进程崩溃或 detach 后，`load_script` / `call_rpc` / `get_script_output` 会返回包含明确指令的错误：
-  > `Process <name> is not attached (reason: ...). Please call the \`attach\` tool again to reconnect before retrying.`
-- LLM 收到该错误后应调用 `attach` 重新附加，并重新 `load_script` 后继续操作
-- `unload_script` 是本地清理，不依赖进程存活
-
-## 发布
-
-推送 `v*` 形式的 Git tag 即可由 GitHub Actions 自动构建并发布 Release（含开箱即用的 `dist/` + `node_modules`）：
-
-```bash
-npm version patch   # 或 minor / major
-git push --follow-tags
-```
-
-工作流定义见 `.github/workflows/release.yml`。
+- [Claude](https://claude.ai/) - AI 编程助手
+- [Frida](https://frida.re/) - 动态插桩框架
+- [MCP](https://modelcontextprotocol.io/) - 模型上下文协议

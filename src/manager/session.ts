@@ -18,6 +18,8 @@ export class SessionManager {
     if (this.session) {
       await this.dispose();
     }
+    this.detachReason = null;
+    this.crashInfo = null;
     this.target = target;
     this.device = await frida.getLocalDevice();
     

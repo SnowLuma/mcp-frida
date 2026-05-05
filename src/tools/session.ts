@@ -34,4 +34,25 @@ export function registerSessionTools(server: McpServer, mgr: SessionManager) {
       }
     },
   );
+
+  server.registerTool(
+    "detach",
+    {
+      title: "Detach from Process",
+      description:
+        "Detach Frida from the current process and unload all persistent scripts. Call this when finished with the target or before attaching to a different process. After detach you MUST call `attach` again before any other tool.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      try {
+        await mgr.dispose();
+        return { content: [{ type: "text", text: "Detached successfully." }] };
+      } catch (e: any) {
+        return {
+          content: [{ type: "text", text: `Failed to detach: ${e.message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
 }
