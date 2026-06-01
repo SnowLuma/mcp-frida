@@ -22,23 +22,71 @@ export class SessionManager {
     this.crashInfo = null;
     this.target = target;
     this.device = await frida.getLocalDevice();
-    
-    if (typeof target === "number") {
-      try {
-        const proc = await this.device.getProcess(target.toString());
-        this.processName = proc.name;
-      } catch {
-        this.processName = `pid:${target}`;
-      }
-    } else {
-      this.processName = target;
-    }
-    
-    this.session = await this.device.attach(target);
+
+    // Resolve to a concrete PID first. Attaching by name lets frida do glob
+    // matching internally, which fails non-deterministically ("Ambiguous name"
+    // when >1 instance, "Process not found" on enumeration races).
+    const resolved = await this.resolveTarget(target);
+    this.target = resolved.pid;
+    this.processName = resolved.name;
+
+    this.session = await this.attachWithRetry(resolved.pid);
     this.session.detached.connect((reason: SessionDetachReason, crash: Crash | null) => {
       this.detachReason = reason;
       if (crash) this.crashInfo = { summary: crash.summary, report: crash.report };
     });
+  }
+
+  // Resolve a PID or process name to a concrete { pid, name }. Names prefer an
+  // exact (case-insensitive) match and only fall back to substring matching;
+  // genuine ambiguity is reported instead of silently picking one.
+  private async resolveTarget(target: number | string): Promise<{ pid: number; name: string }> {
+    const dev = this.device!;
+    const asNum =
+      typeof target === "number"
+        ? target
+        : /^\d+$/.test(target.trim())
+          ? Number(target.trim())
+          : null;
+
+    if (asNum !== null) {
+      const proc = await dev.findProcessByPid(asNum).catch(() => null);
+      return { pid: asNum, name: proc?.name ?? `pid:${asNum}` };
+    }
+
+    const needle = (target as string).toLowerCase();
+    const procs = await dev.enumerateProcesses();
+    const exact = procs.filter((p) => p.name.toLowerCase() === needle);
+    const candidates = exact.length > 0 ? exact : procs.filter((p) => p.name.toLowerCase().includes(needle));
+
+    if (candidates.length === 0) {
+      throw new Error(`No running process matches '${target}'.`);
+    }
+    if (candidates.length > 1) {
+      const list = candidates.map((p) => `${p.name} (pid: ${p.pid})`).join(", ");
+      throw new Error(`Multiple processes match '${target}': ${list}. Re-attach using a specific PID.`);
+    }
+    return { pid: candidates[0].pid, name: candidates[0].name };
+  }
+
+  // Native injection on Windows can fail transiently (timing, AV interference,
+  // a lost device handle). Retry a few times with backoff before giving up.
+  private async attachWithRetry(pid: number, attempts = 3): Promise<Session> {
+    let lastErr: unknown;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await this.device!.attach(pid);
+      } catch (e) {
+        lastErr = e;
+        const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+        const permanent = msg.includes("not found") || msg.includes("no such process") || msg.includes("ambiguous");
+        if (permanent || i === attempts - 1) break;
+        await new Promise((r) => setTimeout(r, 300 * (i + 1)));
+        // Device may have been lost; get a fresh handle before retrying.
+        if (this.device?.isLost()) this.device = await frida.getLocalDevice();
+      }
+    }
+    throw lastErr;
   }
 
   get isAttached(): boolean {
